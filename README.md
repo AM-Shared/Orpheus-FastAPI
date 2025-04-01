@@ -9,18 +9,17 @@ High-performance Text-to-Speech server with OpenAI-compatible API, 8 voices, emo
 ## Changelog
 
 **v1.1.0** (2025-03-23)
-- ✨ Added long-form audio support with sentence-based batching and crossfade stitching
-- 🔊 Improved short audio quality with optimized token buffer handling
-- 🔄 Enhanced environment variable support with .env file loading (configurable via UI)
-- 🖥️ Added automatic hardware detection and optimization for different GPUs
-- 📊 Implemented detailed performance reporting for audio generation
-- ⚠️ Note: Python 3.12 is not supported due to removal of pkgutil.ImpImporter
+- Added long-form audio support with sentence-based batching and crossfade stitching
+- Improved short audio quality with optimized token buffer handling
+- Enhanced environment variable support with .env file loading (configurable via UI)
+- Added automatic hardware detection and optimization for different GPUs
+- Implemented detailed performance reporting for audio generation
+- Note: Python 3.12 is not supported due to removal of pkgutil.ImpImporter
 
 [GitHub Repository](https://github.com/Lex-au/Orpheus-FastAPI)
 
 ## Model Collection
 
-🚀 **NEW:** Try the quantized models for improved performance!
 - **Q2_K**: Ultra-fast inference with 2-bit quantization
 - **Q4_K_M**: Balanced quality/speed with 4-bit quantization (mixed)
 - **Q8_0**: Original high-quality 8-bit model
@@ -52,22 +51,6 @@ Listen to sample outputs with different voices and emotions:
 - **Dynamic Environment Variables**: Update API endpoint, timeouts, and model parameters without editing files
 - **Server Restart**: Apply configuration changes with one-click server restart
 
-## Project Structure
-
-```
-Orpheus-FastAPI/
-├── app.py                # FastAPI server and endpoints
-├── requirements.txt      # Dependencies
-├── static/               # Static assets (favicon, etc.)
-├── outputs/              # Generated audio files
-├── templates/            # HTML templates
-│   └── tts.html          # Web UI template
-└── tts_engine/           # Core TTS functionality
-    ├── __init__.py       # Package exports
-    ├── inference.py      # Token generation and API handling
-    └── speechpipe.py     # Audio conversion pipeline
-```
-
 ## Setup
 
 ### Prerequisites
@@ -89,26 +72,19 @@ cd Orpheus-FastAPI
 # Using venv (Python's built-in virtual environment)
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Or using conda
-conda create -n orpheus-tts python=3.10
-conda activate orpheus-tts
 ```
 
-3. Install PyTorch with CUDA support:
+3. Install PyTorch:
 ```bash
-pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+# normal
+pip3 install torch torchaudio
+# from nvidia
+pip3 install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
 ```
 
 4. Install other dependencies:
 ```bash
 pip3 install -r requirements.txt
-```
-
-5. Set up the required directories:
-```bash
-# Create directories for outputs and static files
-mkdir -p outputs static
 ```
 
 ### Starting the Server
@@ -328,12 +304,12 @@ When running the Orpheus model with llama.cpp, use these parameters to ensure op
 
 ```bash
 ./llama-server -m models/Modelname.gguf \
-  --ctx-size={{your ORPHEUS_MAX_TOKENS from .env}} \
-  --n-predict={{your ORPHEUS_MAX_TOKENS from .env}} \
-  --rope-scaling=linear
+  --ctx-size {{your ORPHEUS_MAX_TOKENS from .env}} \
+  --n-predict {{your ORPHEUS_MAX_TOKENS from .env}} \
+  --rope-scaling linear
 ```
 
-Important parameters:
+Where:
 - `--ctx-size`: Sets the context window size, should match your ORPHEUS_MAX_TOKENS setting
 - `--n-predict`: Maximum tokens to generate, should match your ORPHEUS_MAX_TOKENS setting
 - `--rope-scaling=linear`: Required for optimal positional encoding with the Orpheus model
