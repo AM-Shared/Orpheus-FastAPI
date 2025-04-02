@@ -10,42 +10,19 @@ import argparse
 import threading
 import queue
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
-from typing import List, Dict, Any, Optional, Generator, Union, Tuple
-from dotenv import load_dotenv
-
-
-# Helper to detect if running in Uvicorn's reloader
-def is_reloader_process():
-    """Check if the current process is a uvicorn reloader"""
-    return (
-        sys.argv[0].endswith("_continuation.py")
-        or os.environ.get("UVICORN_STARTED") == "true"
-    )
-
-
-# Set a flag to avoid repeat messages
-IS_RELOADER = is_reloader_process()
-if not IS_RELOADER:
-    os.environ["UVICORN_STARTED"] = "true"
-
-# Load environment variables from .env file
-load_dotenv()
-
-# Detect hardware capabilities and display information
 import torch
 import psutil
+from typing import AsyncGenerator, List, Optional, Generator
+from config import Env
+from .speechpipe import turn_token_into_id, CUSTOM_TOKEN_PREFIX
 
-# Detect if we're on a high-end system based on hardware capabilities
 HIGH_END_GPU = False
-if torch.cuda.is_available():
-    # Get GPU properties
+if torch.cuda.is_available():  # gpu
     props = torch.cuda.get_device_properties(0)
     gpu_name = props.name
     gpu_mem_gb = props.total_memory / (1024**3)
     compute_capability = f"{props.major}.{props.minor}"
 
-    # Consider high-end if: large VRAM (≥16GB) OR high compute capability (≥8.0) OR large VRAM (≥12GB) with good CC (≥7.0)
     HIGH_END_GPU = (
         gpu_mem_gb >= 16.0
         or props.major >= 8
@@ -53,108 +30,36 @@ if torch.cuda.is_available():
     )
 
     if HIGH_END_GPU:
-        if not IS_RELOADER:
-            print(f"🖥️ Hardware: High-end CUDA GPU detected")
-            print(f"📊 Device: {gpu_name}")
-            print(f"📊 VRAM: {gpu_mem_gb:.2f} GB")
-            print(f"📊 Compute Capability: {compute_capability}")
-            print("🚀 Using high-performance optimizations")
+        print(f"Hardware: High-end CUDA GPU detected")
+        print(f"Device: {gpu_name}")
+        print(f"VRAM: {gpu_mem_gb:.2f} GB")
+        print(f"Compute Capability: {compute_capability}")
+        print("USING HIGH-PERFORMANCE OPTIMIZATIONS")
     else:
-        if not IS_RELOADER:
-            print(f"🖥️ Hardware: CUDA GPU detected")
-            print(f"📊 Device: {gpu_name}")
-            print(f"📊 VRAM: {gpu_mem_gb:.2f} GB")
-            print(f"📊 Compute Capability: {compute_capability}")
-            print("🚀 Using GPU-optimized settings")
-else:
-    # Get CPU info
+        print(f"Hardware: CUDA GPU detected")
+        print(f"Device: {gpu_name}")
+        print(f"VRAM: {gpu_mem_gb:.2f} GB")
+        print(f"Compute Capability: {compute_capability}")
+        print("USING GPU-OPTIMIZED SETTINGS")
+
+else:  # cpu
     cpu_cores = psutil.cpu_count(logical=False)
     cpu_threads = psutil.cpu_count(logical=True)
     ram_gb = psutil.virtual_memory().total / (1024**3)
-
-    if not IS_RELOADER:
-        print(f"🖥️ Hardware: CPU only (No CUDA GPU detected)")
-        print(f"📊 CPU: {cpu_cores} cores, {cpu_threads} threads")
-        print(f"📊 RAM: {ram_gb:.2f} GB")
-        print("⚙️ Using CPU-optimized settings")
-
-# Load configuration from environment variables without hardcoded defaults
-# Critical settings - will log errors if missing
-required_settings = ["ORPHEUS_API_URL"]
-missing_settings = [s for s in required_settings if s not in os.environ]
-if missing_settings:
-    print(
-        f"ERROR: Missing required environment variable(s): {', '.join(missing_settings)}"
-    )
-    print("Please set them in .env file or environment. See .env.example for defaults.")
-
-# API connection settings
-API_URL = os.environ.get("ORPHEUS_API_URL")
-if not API_URL:
-    print("WARNING: ORPHEUS_API_URL not set. API calls will fail until configured.")
+    print(f"Harware: CPU only (No CUDA GPU detected)")
+    print(f"CPU: {cpu_cores} cores, {cpu_threads} threads")
+    print(f"RAM: {ram_gb:.2f} GB")
+    print("USING CPU-OPTIMIZED SETTINGS.")
 
 HEADERS = {"Content-Type": "application/json"}
-
-# Request timeout settings
-try:
-    REQUEST_TIMEOUT = int(os.environ.get("ORPHEUS_API_TIMEOUT", "120"))
-except (ValueError, TypeError):
-    print("WARNING: Invalid ORPHEUS_API_TIMEOUT value, using 120 seconds as fallback")
-    REQUEST_TIMEOUT = 120
-
-# Model generation parameters from environment variables
-try:
-    MAX_TOKENS = int(os.environ.get("ORPHEUS_MAX_TOKENS", "8192"))
-except (ValueError, TypeError):
-    print("WARNING: Invalid ORPHEUS_MAX_TOKENS value, using 8192 as fallback")
-    MAX_TOKENS = 8192
-
-try:
-    TEMPERATURE = float(os.environ.get("ORPHEUS_TEMPERATURE", "0.6"))
-except (ValueError, TypeError):
-    print("WARNING: Invalid ORPHEUS_TEMPERATURE value, using 0.6 as fallback")
-    TEMPERATURE = 0.6
-
-try:
-    TOP_P = float(os.environ.get("ORPHEUS_TOP_P", "0.9"))
-except (ValueError, TypeError):
-    print("WARNING: Invalid ORPHEUS_TOP_P value, using 0.9 as fallback")
-    TOP_P = 0.9
-
-# Repetition penalty is hardcoded to 1.1 which is the only stable value for quality output
 REPETITION_PENALTY = 1.1
-
-try:
-    SAMPLE_RATE = int(os.environ.get("ORPHEUS_SAMPLE_RATE", "24000"))
-except (ValueError, TypeError):
-    print("WARNING: Invalid ORPHEUS_SAMPLE_RATE value, using 24000 as fallback")
-    SAMPLE_RATE = 24000
-
-# Print loaded configuration only in the main process, not in the reloader
-if not IS_RELOADER:
-    print(f"Configuration loaded:")
-    print(f"  API_URL: {API_URL}")
-    print(f"  MAX_TOKENS: {MAX_TOKENS}")
-    print(f"  TEMPERATURE: {TEMPERATURE}")
-    print(f"  TOP_P: {TOP_P}")
-    print(f"  REPETITION_PENALTY: {REPETITION_PENALTY}")
-
-# Parallel processing settings
 NUM_WORKERS = 4 if HIGH_END_GPU else 2
-
-# Available voices based on the Orpheus-TTS repository
 AVAILABLE_VOICES = ["tara", "leah", "jess", "leo", "dan", "mia", "zac", "zoe"]
-DEFAULT_VOICE = "tara"  # Best voice according to documentation
-
-# Import the unified token handling from speechpipe
-from .speechpipe import turn_token_into_id, CUSTOM_TOKEN_PREFIX
-
-# Special token IDs for Orpheus model
+DEFAULT_VOICE = "tara"
 START_TOKEN_ID = 128259
 END_TOKEN_IDS = [128009, 128260, 128261, 128257]
 
 
-# Performance monitoring
 class PerformanceMonitor:
     """Track and report performance metrics"""
 
@@ -186,8 +91,6 @@ class PerformanceMonitor:
 
         tokens_per_sec = self.token_count / elapsed
         chunks_per_sec = self.audio_chunks / elapsed
-
-        # Estimate audio duration based on audio chunks (each chunk is ~0.085s of audio)
         est_duration = self.audio_chunks * 0.085
 
         print(
@@ -195,7 +98,6 @@ class PerformanceMonitor:
         )
 
 
-# Create global performance monitor
 perf_monitor = PerformanceMonitor()
 
 
@@ -220,10 +122,10 @@ def format_prompt(prompt: str, voice: str = DEFAULT_VOICE) -> str:
 
 def generate_tokens_from_api(
     prompt: str,
-    voice: str = DEFAULT_VOICE,
-    temperature: float = TEMPERATURE,
-    top_p: float = TOP_P,
-    max_tokens: int = MAX_TOKENS,
+    voice: str = "tara",
+    temperature: float = Env.orpheus_temperature,
+    top_p: float = Env.orpheus_top_p,
+    max_tokens: int = Env.orpheus_max_tokens,
     repetition_penalty: float = REPETITION_PENALTY,
 ) -> Generator[str, None, None]:
     """Generate tokens from text using OpenAI-compatible API with optimized streaming and retry logic."""
@@ -263,11 +165,11 @@ def generate_tokens_from_api(
         try:
             # Make the API request with streaming and timeout
             response = session.post(
-                API_URL,
+                Env.orpheus_api_url,
                 headers=HEADERS,
                 json=payload,
                 stream=True,
-                timeout=REQUEST_TIMEOUT,
+                timeout=Env.orpheus_api_timeout,
             )
 
             if response.status_code != 200:
@@ -324,7 +226,7 @@ def generate_tokens_from_api(
             return
 
         except requests.exceptions.Timeout:
-            print(f"Request timed out after {REQUEST_TIMEOUT} seconds")
+            print(f"Request timed out after {Env.orpheus_api_timeout} seconds")
             retry_count += 1
             if retry_count < max_retries:
                 wait_time = 2**retry_count
@@ -337,7 +239,7 @@ def generate_tokens_from_api(
                 return
 
         except requests.exceptions.ConnectionError:
-            print(f"Connection error to API at {API_URL}")
+            print(f"Connection error to API at {Env.orpheus_api_url}")
             retry_count += 1
             if retry_count < max_retries:
                 wait_time = 2**retry_count
@@ -368,7 +270,7 @@ def convert_to_audio(multiframe: List[int], count: int) -> Optional[bytes]:
     return result
 
 
-async def tokens_decoder(token_gen) -> Generator[bytes, None, None]:
+async def tokens_decoder(token_gen) -> AsyncGenerator[bytes, None]:
     """Simplified token decoder with early first-chunk processing for lower latency."""
     buffer = []
     count = 0
@@ -452,7 +354,7 @@ def tokens_decoder_sync(syn_token_gen, output_file=None):
         wav_file = wave.open(output_file, "wb")
         wav_file.setnchannels(1)
         wav_file.setsampwidth(2)
-        wav_file.setframerate(SAMPLE_RATE)
+        wav_file.setframerate(Env.orpheus_sample_rate)
 
     # Batch processing of tokens for improved throughput
     batch_size = 32 if HIGH_END_GPU else 16
@@ -601,7 +503,9 @@ def tokens_decoder_sync(syn_token_gen, output_file=None):
     # Calculate and print detailed performance metrics
     if audio_segments:
         total_bytes = sum(len(segment) for segment in audio_segments)
-        duration = total_bytes / (2 * SAMPLE_RATE)  # 2 bytes per sample at 24kHz
+        duration = total_bytes / (
+            2 * Env.orpheus_sample_rate
+        )  # 2 bytes per sample at 24kHz
         total_time = time.time() - perf_monitor.start_time
         realtime_factor = duration / total_time if total_time > 0 else 0
 
@@ -630,7 +534,7 @@ def stream_audio(audio_buffer):
         audio_float = audio_data.astype(np.float32) / 32767.0
 
         # Play the audio with proper device selection and error handling
-        sd.play(audio_float, SAMPLE_RATE)
+        sd.play(audio_float, Env.orpheus_sample_rate)
         sd.wait()
     except Exception as e:
         print(f"Audio playback error: {e}")
@@ -692,10 +596,10 @@ def generate_speech_from_api(
     prompt,
     voice=DEFAULT_VOICE,
     output_file=None,
-    temperature=TEMPERATURE,
-    top_p=TOP_P,
-    max_tokens=MAX_TOKENS,
-    repetition_penalty=None,
+    temperature=Env.orpheus_temperature,
+    top_p=Env.orpheus_top_p,
+    max_tokens=Env.orpheus_max_tokens,
+    repetition_penalty=REPETITION_PENALTY,
     use_batching=True,
     max_batch_chars=1000,
 ):
@@ -724,7 +628,7 @@ def generate_speech_from_api(
                 temperature=temperature,
                 top_p=top_p,
                 max_tokens=max_tokens,
-                repetition_penalty=REPETITION_PENALTY,  # Always use hardcoded value
+                repetition_penalty=repetition_penalty,  # Always use hardcoded value
             ),
             output_file=output_file,
         )
@@ -785,7 +689,7 @@ def generate_speech_from_api(
                 temperature=temperature,
                 top_p=top_p,
                 max_tokens=max_tokens,
-                repetition_penalty=REPETITION_PENALTY,
+                repetition_penalty=repetition_penalty,
             ),
             output_file=temp_output_file,
         )
@@ -812,7 +716,9 @@ def generate_speech_from_api(
     # Calculate combined duration
     if all_audio_segments:
         total_bytes = sum(len(segment) for segment in all_audio_segments)
-        duration = total_bytes / (2 * SAMPLE_RATE)  # 2 bytes per sample at 24kHz
+        duration = total_bytes / (
+            2 * Env.orpheus_sample_rate
+        )  # 2 bytes per sample at 24kHz
         print(f"Generated {len(all_audio_segments)} audio segments")
         print(f"Generated {duration:.2f} seconds of audio in {total_time:.2f} seconds")
         print(f"Realtime factor: {duration/total_time:.2f}x")
@@ -839,8 +745,10 @@ def stitch_wav_files(input_files, output_file, crossfade_ms=50):
         return
 
     # Convert crossfade_ms to samples
-    crossfade_samples = int(SAMPLE_RATE * crossfade_ms / 1000)
-    print(f"Using {crossfade_samples} samples for crossfade at {SAMPLE_RATE}Hz")
+    crossfade_samples = int(Env.orpheus_sample_rate * crossfade_ms / 1000)
+    print(
+        f"Using {crossfade_samples} samples for crossfade at {Env.orpheus_sample_rate}Hz"
+    )
 
     # Build the final audio in memory with crossfades
     final_audio = np.array([], dtype=np.int16)
@@ -941,11 +849,14 @@ def main():
     parser.add_argument(
         "--temperature",
         type=float,
-        default=TEMPERATURE,
+        default=Env.orpheus_temperature,
         help="Temperature for generation",
     )
     parser.add_argument(
-        "--top_p", type=float, default=TOP_P, help="Top-p sampling parameter"
+        "--Env.orpheus_top_p",
+        type=float,
+        default=Env.orpheus_top_p,
+        help="Top-p sampling parameter",
     )
     parser.add_argument(
         "--repetition_penalty",
@@ -967,7 +878,7 @@ def main():
             "--voice",
             "--output",
             "--temperature",
-            "--top_p",
+            "--Env.orpheus_top_p",
             "--repetition_penalty",
         ):
             prompt = " ".join([arg for arg in sys.argv[1:] if not arg.startswith("--")])
@@ -993,6 +904,7 @@ def main():
         voice=args.voice,
         temperature=args.temperature,
         top_p=args.top_p,
+        max_tokens=args.max_tokens,
         repetition_penalty=args.repetition_penalty,
         output_file=output_file,
     )

@@ -9,27 +9,21 @@ import os
 import sys
 
 
-# Helper to detect if running in Uvicorn's reloader (same as in inference.py)
-def is_reloader_process():
-    """Check if the current process is a uvicorn reloader"""
-    return (
-        sys.argv[0].endswith("_continuation.py")
-        or os.environ.get("UVICORN_STARTED") == "true"
-    )
+# flag to avoid repeat messages
+IS_RELOADER = (
+    sys.argv[0].endswith("_continuation.py")
+    or os.environ.get("UVICORN_STARTED") == "true"
+)
 
-
-# Set a flag to avoid repeat messages
-IS_RELOADER = is_reloader_process()
-
-# Try to enable torch.compile if PyTorch 2.0+ is available
+# enable torch.compile if PyTorch 2.0+ is available
 TORCH_COMPILE_AVAILABLE = False
 try:
     if hasattr(torch, "compile"):
         TORCH_COMPILE_AVAILABLE = True
         if not IS_RELOADER:
             print("PyTorch 2.0+ detected, torch.compile is available")
-except:
-    pass
+except Exception as e:
+    print(f"Error checking torch.compile: {e}")
 
 # Try to enable CUDA graphs if available
 CUDA_GRAPHS_AVAILABLE = False
@@ -38,8 +32,8 @@ try:
         CUDA_GRAPHS_AVAILABLE = True
         if not IS_RELOADER:
             print("CUDA graphs support is available")
-except:
-    pass
+except Exception as e:
+    print(f"Error checking CUDA graphs: {e}")
 
 model = SNAC.from_pretrained("hubertsiuzdak/snac_24khz").eval()
 
