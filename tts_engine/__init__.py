@@ -11,5 +11,5 @@ from .inference import (
     generate_speech_from_api,
     AVAILABLE_VOICES,
     DEFAULT_VOICE,
-    list_available_voices
+    list_available_voices,
 )
